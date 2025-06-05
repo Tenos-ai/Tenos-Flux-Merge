@@ -1,6 +1,6 @@
 # Tenos.ai Merge Node (FLUX) for ComfyUI
 
-The Tenos.ai Merge Node is a powerful custom node for ComfyUI designed for merging Stable Diffusion models, with a special focus and block definitions tailored for the **FLUX.1 Dev model architecture**. It offers a variety of merge methods and allows fine-grained, block-specific control over how much each model contributes to the final merged result.
+The Tenos.ai Merge Node is a powerful custom node for ComfyUI designed for merging Flux Diffusion models, with a special focus and block definitions tailored for the **FLUX.1 Dev model architecture**. It offers a variety of merge methods and allows fine-grained, block-specific control over how much each model contributes to the final merged result.
 
 ## Key Features
 
