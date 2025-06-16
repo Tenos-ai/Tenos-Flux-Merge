@@ -1,31 +1,26 @@
 # Tenos.ai Merge Node (FLUX) for ComfyUI
 
-The Tenos.ai Merge Node is a powerful custom node for ComfyUI designed for merging Flux Diffusion models, with a special focus and block definitions tailored for the **FLUX.1 Dev model architecture**. It offers a variety of merge methods and allows fine-grained, block-specific control over how much each model contributes to the final merged result.
+The Tenos.ai Merge Node is a robust, memory-optimized custom node for ComfyUI designed for merging diffusion models. It is highly specialized for **FLUX-style architectures**, featuring an intuitive, block-based control system that allows for granular and predictable merging.
+
+This node has been hardened through extensive testing to handle VRAM limitations, device-offloading state changes, and cross-precision model merging, ensuring a stable and reliable user experience even across repeated runs.
 
 ## Key Features
 
-*   **FLUX.1 Dev Optimized:** Block definitions and naming conventions are specifically designed for the FLUX.1 Dev model structure (e.g., "double blocks," "single blocks" with specific layer groupings).
-*   **Multiple Merge Methods:**
-    *   `simple`: Basic linear interpolation.
-    *   `dare` (Drop and ReScale): Selectively merges based on weight differences and drops less important weights.
-    *   `weighted_sum`: A straightforward weighted average of the two models.
-    *   `sigmoid_average`: A weighted average where the weight is determined by a sigmoid function, offering smoother transitions.
-    *   `tensor_addition`: Direct summation of tensor values.
+*   **Memory Optimized:** Merges are performed **in-place** without cloning the base model, drastically reducing VRAM consumption and preventing allocation errors on consecutive runs.
+*   **Intuitive Functional Blocks:** No more guessing which layers you're merging. Blocks are named by their function in the image generation process (e.g., "Early Downsampling (Composition)," "Core/Middle Block (Style Focus)"), with tooltips explaining each one.
+*   **Robust Error Handling:**
+    *   Immune to ComfyUI's model offloading (`cuda vs cpu` errors).
+    *   Handles massive models (like FLUX) without crashing in `DARE` mode.
+    *   Gracefully handles cross-precision merging (e.g., FP16 and FP8).
+*   **Advanced Merge Methods:** A full suite of mathematically correct merge algorithms:
+    *   `simple`: Linear interpolation.
+    *   `dare`: Robustly prunes the smallest changes and merges the most significant ones.
+    *   `weighted_sum`: A straightforward weighted average.
+    *   `sigmoid_average`: Non-linear averaging for smoother blending.
+    *   `tensor_addition`: Adds scaled tensor values from the secondary model.
     *   `difference_maximization`: Emphasizes areas where the models differ most.
-*   **Granular Block Control:** Adjust merge amounts for distinct sections of the FLUX.1 Dev model:
-    *   Image Input (`img_in`)
-    *   Time Embeddings (`time_in`)
-    *   Text/Conditioning Embeddings (`txt_in`)
-    *   Guidance/Vector Embeddings (configurable)
-    *   Specific groups of "Double Blocks" (input blocks of the UNet)
-    *   Specific groups of "Single Blocks" (output blocks and middle block of the UNet)
-    *   Final Output Layer (`final_layer`)
-    *   Other/Uncategorized Layers (`other_amount`)
-*   **Base Model Selection:** Option to automatically use the smaller model as the base for merging.
-*   **Dimension Mismatch Handling:** `force_keep_dim` option to keep the base model's tensor if dimensions mismatch, preventing errors.
-*   **Masking (Optional):** Use a third model as a mask to selectively apply merging. *(Note: This feature's effectiveness depends on the mask model's structure and how it aligns with the tensors being merged.)*
-*   **Detailed JSON Summary:** Outputs a string containing a JSON summary of the merge operation, including settings, model sizes, and merge statistics.
-*   **Logging:** Provides debug-level logging for detailed insight into the merging process (check your ComfyUI console).
+*   **Explicit Base Model Selection:** You have direct control to choose which model (`model1` or `model2`) serves as the foundation for the merge.
+*   **Detailed JSON Summary:** Outputs a clean JSON string summarizing the entire merge operation, including all settings and statistics, for perfect reproducibility.
 
 ## Installation
 
@@ -40,98 +35,80 @@ The Tenos.ai Merge Node is a powerful custom node for ComfyUI designed for mergi
 
 ## Usage
 
-1.  **Find the Node:** Right-click on the ComfyUI canvas, navigate to `Add Node` -> `Tenos.ai`, and select `Tenosai Merge Node (FLUX)`.
+1.  **Find the Node:** Right-click on the ComfyUI canvas, navigate to `Add Node` -> `Tenos.ai`, and select `Tenosai Merge (FLUX)`.
 2.  **Connect Models:**
-    *   Connect your primary FLUX.1 Dev model to `model1`.
-    *   Connect your secondary FLUX.1 Dev model to `model2`.
-    *   Optionally, connect a third model to `mask_model` if you wish to use masking.
-3.  **Configure Parameters:** Adjust the merge mode, block-specific amounts, and other settings as desired.
+    *   Connect your primary FLUX model to `model1`.
+    *   Connect your secondary FLUX model to `model2`.
+3.  **Configure Parameters:**
+    *   Choose your desired `base_model_choice` and `merge_mode`.
+    *   Adjust the sliders for each functional block. Hover over a slider's name to see its tooltip and understand what it controls.
 4.  **Output:**
-    *   The `MODEL` output is the merged model, ready to be used by a KSampler or other nodes.
-    *   The `STRING` output provides a JSON summary of the merge process, which can be useful for tracking experiments.
+    *   The `MODEL` output is the merged model, ready for a KSampler.
+    *   The `STRING` output provides the JSON summary for your records.
 
-## Inputs
+## Inputs Explained
 
 **Required:**
 
-*   **`model1`**: (`MODEL`) The first FLUX.1 Dev model to merge.
-*   **`model2`**: (`MODEL`) The second FLUX.1 Dev model to merge.
-*   **`use_smaller_model`**: (`BOOLEAN`, Default: `False`) If `True`, the smaller of `model1` and `model2` (by file size or estimated parameter size) will be used as the base model for the merge. Otherwise, `model1` is the base if it's larger or equal, and `model2` if `model1` is smaller.
-*   **`merge_mode`**: (`COMBO`) The merging algorithm to use:
-    *   `simple`
-    *   `dare`
-    *   `weighted_sum`
-    *   `sigmoid_average`
-    *   `tensor_addition`
-    *   `difference_maximization`
-*   **`img_in`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for image input related blocks (e.g., `input_hint_block`).
-*   **`time_in`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for time embedding blocks.
-*   **`guidance_in`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for guidance/vector related blocks (configurable, general category).
-*   **`vector_in`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for additional vector inputs (if identified as such).
-*   **`txt_in`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for text/conditioning related blocks (e.g., `cond_stage_model`, `cond_proj`).
-*   **`double_blocks_0_5_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for FLUX.1 input blocks 0-3 (referred to as Double Blocks group 1).
-*   **`double_blocks_6_12_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for FLUX.1 input blocks 4-8 (referred to as Double Blocks group 2).
-*   **`double_blocks_13_18_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for FLUX.1 input blocks 9-11 (referred to as Double Blocks group 3).
-*   **`single_blocks_0_15_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for FLUX.1 output blocks 0-5 (referred to as Single Blocks group 1).
-*   **`single_blocks_16_25_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for FLUX.1 output blocks 6-8 and the middle block (referred to as Single Blocks group 2).
-*   **`single_blocks_26_37_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for FLUX.1 output blocks 9-11 (referred to as Single Blocks group 3).
-*   **`final_layer_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for the final output convolution of the UNet.
-*   **`other_amount`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Merge amount for any parameters not categorized into the above blocks.
-*   **`force_keep_dim`**: (`BOOLEAN`, Default: `False`) If `True` and tensor shapes mismatch, the base model's tensor is kept, preventing errors. If `False`, a ValueError is raised.
-*   **`random_drop_probability`**: (`FLOAT`, 0.0-1.0, Default: 0.1) Used by the `dare` merge mode. Probability of dropping weights.
-*   **`weight_1`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Used by `weighted_sum` and (indirectly by `simple` if amount != 0.5). The weight applied to `model1`'s tensors (or base model's tensors). `model2` (secondary model) gets `1 - weight_1`.
-*   **`sigmoid_strength`**: (`FLOAT`, 0.0-1.0, Default: 0.5) Used by `sigmoid_average`. Controls the steepness and center of the sigmoid curve, influencing the blending. A value of 0.5 results in an equal (0.5) weight. Values closer to 0 or 1 will heavily favor one model over the other.
+*   **`model1` / `model2`**: (`MODEL`) The two models to be merged.
+*   **`base_model_choice`**: (`COMBO`) Explicitly choose `model1` or `model2` to be the base for the merge.
+*   **`merge_mode`**: (`COMBO`) The merging algorithm to use.
+*   **Block Weights**: (`FLOAT`, 0.0-1.0) Sliders to control the merge ratio for each part of the model. A value of 0.0 keeps the base model's block, while 1.0 uses the secondary model's block.
+    *   `Image Hint`: Controls influence from IPAdapters or ControlNets.
+    *   `Timestep Embedding`: Controls how the model interprets the noise level at each step.
+    *   `Text Conditioning`: Controls the influence of the prompt.
+    *   `Early Downsampling (Composition)`: Defines the image's basic composition and structure.
+    *   `Mid Downsampling (Subject & Concept)`: Develops the core concepts and subjects.
+    *   `Late Downsampling (Refinement)`: Refines abstract concepts before the style core.
+    *   `Core/Middle Block (Style Focus)`: The central block, critical for style and subject matter.
+    *   `Early Upsampling (Initial Style)`: First upscaling layers where style is initially applied.
+    *   `Mid Upsampling (Detail Generation)`: Main upscaling layers that add and refine details.
+    *   `Late Upsampling (Final Textures)`: Final upscaling layers for fine details and textures.
+    *   `Final Output Layer (Latent Projection)`: The final conversion to the latent image.
+    *   `Other Tensors`: Controls any remaining tensors not covered by the main blocks.
+*   **Mode-Specific Parameters:**
+    *   **For `dare` mode:**
+        *   `dare_prune_amount`: (0.0-1.0) The percentage of the *least significant* weight changes to ignore (prune).
+        *   `dare_merge_amount`: (0.0-1.0) The strength of the merge applied to the *most significant* changes that were not pruned.
+    *   **For `weighted_sum` mode:**
+        *   `weight_1`: (0.0-1.0) The weight for `model1`. `model2` receives `1.0 - weight_1`.
+    *   **For `sigmoid_average` mode:**
+        *   `sigmoid_strength`: (0.0-1.0) Controls the non-linear blending curve.
 
 **Optional:**
 
-*   **`mask_model`**: (`MODEL`) A third model whose parameters can be used as a mask during merging. Where the mask tensor is 1, merging occurs; where 0, the base model's tensor is kept. *Note: Structural similarity is important for this to be effective.*
+*   **`mask_model`**: (`MODEL`) A third model whose parameters can be used as a mask. *Note: Structural similarity is important for this to be effective.*
 
 ## Outputs
 
-*   **`MODEL`**: The merged FLUX.1 Dev model.
-*   **`STRING`**: A JSON formatted string containing a summary of the merge operation, including model sizes, merge statistics (components merged, kept, errored), and all applied settings.
+*   **`MODEL`**: The merged FLUX model.
+*   **`STRING`**: A JSON formatted string containing a complete summary of the merge operation.
 
-## Merge Methods Explained
+## Block Mapping Explained
 
-*   **`simple`**: `merged = base * (1 - amount) + secondary * amount`. A linear interpolation.
-*   **`dare`**: (Drop and ReScale) Identifies important differences between tensors. Randomly drops some weights based on `random_drop_probability` and this importance, then merges the rest. Aims to preserve unique features while reducing redundancy.
-*   **`weighted_sum`**: `merged = base * weight_1 + secondary * (1 - weight_1)`.
-*   **`sigmoid_average`**: `weight = 1 / (1 + exp(-10 * (sigmoid_strength - 0.5)))`, then `merged = base * weight + secondary * (1 - weight)`. This creates a smoother, non-linear weighting.
-*   **`tensor_addition`**: `merged = base + secondary`. Can lead to large values; use with caution.
-*   **`difference_maximization`**: Normalizes the absolute difference between tensors and uses this normalized difference to weight the secondary model more heavily where differences are large: `merged = base * (1 - normalized_diff) + secondary * normalized_diff`.
+The intuitive labels in the UI correspond to the technical block names in FLUX-style models as follows:
 
-## FLUX.1 Dev Block Definitions (Approximate)
-
-The block categories in this node are designed to align with the FLUX.1 Dev architecture:
-
-*   **Input Embeddings:**
-    *   `img_in`: Hint/image encoder related.
-    *   `time_in`: Time step embeddings.
-    *   `txt_in`: Text/prompt conditioning embeddings.
-    *   `guidance_in`/`vector_in`: Other forms of conditioning or vector inputs.
-*   **UNet Backbone (Diffusion Model):**
-    *   `double_blocks_0_5`: Early input blocks of the UNet (e.g., `input_blocks.0` to `input_blocks.3`). These are "DoubleTransformerBlock" in FLUX.
-    *   `double_blocks_6_12`: Mid input blocks (e.g., `input_blocks.4` to `input_blocks.8`).
-    *   `double_blocks_13_18`: Late input blocks (e.g., `input_blocks.9` to `input_blocks.11`).
-    *   `single_blocks_0_15`: Early output blocks (e.g., `output_blocks.0` to `output_blocks.5`). These are "SingleTransformerBlock" in FLUX.
-    *   `single_blocks_16_25`: Mid output blocks (e.g., `output_blocks.6` to `output_blocks.8`) AND the `middle_block`.
-    *   `single_blocks_26_37`: Late output blocks (e.g., `output_blocks.9` to `output_blocks.11`).
-    *   `final_layer`: The final convolutional layer (`out`).
-*   **`other_amount`**: Catches any layers not fitting the above, such as normalization layers not directly part of a transformer block, or other utility layers.
-
-*(Note: The exact mapping of layer indices to these groups is based on the internal logic of `get_block_from_key` in the script.)*
+| UI Label                             | Technical Block Name(s)                                    |
+| ------------------------------------ | ---------------------------------------------------------- |
+| `Early Downsampling (Composition)`   | `input_blocks` / `double_blocks` **0-3**                   |
+| `Mid Downsampling (Subject & Concept)` | `input_blocks` / `double_blocks` **4-8**                   |
+| `Late Downsampling (Refinement)`     | `input_blocks` / `double_blocks` **9-15**                  |
+| `Core/Middle Block (Style Focus)`    | `middle_block`                                             |
+| `Early Upsampling (Initial Style)`   | `output_blocks` / `single_blocks` **0-3**                  |
+| `Mid Upsampling (Detail Generation)` | `output_blocks` / `single_blocks` **4-8**                  |
+| `Late Upsampling (Final Textures)`   | `output_blocks` / `single_blocks` **9-15**                 |
+| `Final Output Layer`                 | `out`                                                      |
+| `Text Conditioning`                  | `conditioner`, `cond_proj`                                 |
 
 ## Tips & Use Cases
 
-*   **Targeted Merging:** This node excels when you want to, for example, take the text understanding (`txt_in`) from Model A but the style from the early UNet blocks (`double_blocks_...`) of Model B.
-*   **Experimentation:** Start with `simple` or `weighted_sum` and small deviations from 0.5 for block amounts. Then, explore more complex methods like `dare` or `difference_maximization`.
-*   **Iterative Refinement:** Use the JSON output to track your settings and results. Merge, test, adjust.
-*   **Understanding FLUX:** Familiarity with the FLUX.1 Dev model architecture will help in making informed decisions about block-specific merge amounts.
-*   **Console Logs:** Check the ComfyUI console for detailed logs during the merge, especially if you encounter unexpected behavior or want to see which parameters fall into the `other` category.
+*   **Targeted Style Transfer:** To transfer the style from `model2` to the structure of `model1`, set `model1` as the base and increase the weights for `Core/Middle Block` and the `Upsampling` blocks.
+*   **Concept Blending:** For blending concepts, try adjusting the `Downsampling` blocks, as this is where the model interprets the core subject matter.
+*   **DARE for Fine-Tuning:** The `dare` mode is excellent for merging a fine-tuned model (e.g., one trained on a character) into a base model. Use a small `dare_prune_amount` (like 0.05) and a `dare_merge_amount` of 1.0 to add only the most important changes from the fine-tune.
+*   **Iterative Workflow:** This node is designed for repeated runs. You can merge two models, send the output to the sampler, and then feed the *same output* back into the `model1` slot to merge it with a third model, all without crashing.
 
 ## Troubleshooting & Notes
 
-*   **FLUX.1 Dev Specificity:** While it might work on other models, the block definitions are highly specific to FLUX.1 Dev. Results on other architectures may be unpredictable.
-*   **Memory Usage:** Merging large models can be memory-intensive. Ensure you have sufficient RAM/VRAM.
-*   **Parameter Mismatches:** The `force_keep_dim` option is a safeguard. If disabled, ensure your models have compatible architectures for layers you intend to merge.
-*   **Mask Model:** The `mask_model` should ideally have a similar structure to the models being merged for the masking to be meaningful at a per-parameter level.
+*   **Memory Usage:** This node is highly memory-optimized due to its in-place merging strategy. It is significantly more stable than nodes that clone the model in memory.
+*   **Architecture Compatibility:** The node is optimized for FLUX models but may work on other architectures that use similar block naming (`input_blocks`, `output_blocks`, etc.).
+*   **Parameter Mismatches:** If a tensor exists in one model but not the other (or has a different shape), it is automatically skipped, and the base model's tensor is kept. An error will not be raised. Check the console for warnings.
