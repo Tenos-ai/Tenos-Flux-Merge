@@ -66,14 +66,15 @@ class TenosaiMergeNode:
     CATEGORY = "Tenos.ai"
 
     def tenosai_merge(self, **kwargs) -> Tuple[Any, str]:
-        model1, model2, base_model_choice, merge_mode = kwargs['model1'], kwargs['model2'], kwargs['base_model_choice'], kwargs['merge_mode']
-        base_model, secondary_model = (model1, model2) if base_model_choice == "model1" else (model2, model1)
-        self.logger.info(f"Base: '{base_model_choice}'. Mode: '{merge_mode}'.")
-
-        merged_model = base_model
-        secondary_sd = secondary_model.model.state_dict()
+        model1, model2 = kwargs['model1'], kwargs['model2']
+        base_model_choice = kwargs['base_model_choice']
         
-        merge_info = self.perform_block_merge(merged_model, secondary_sd, kwargs)
+        base_model_obj, secondary_model_obj = (model1, model2) if base_model_choice == "model1" else (model2, model1)
+        merged_model = base_model_obj.clone()
+        
+        self.logger.info(f"Base: '{base_model_choice}'. Mode: '{kwargs['merge_mode']}'.")
+
+        merge_info = self.perform_block_merge(merged_model, secondary_model_obj, kwargs)
         
         size1 = sum(p.numel() * p.element_size() for p in model1.model.parameters()) / (1024**3)
         size2 = sum(p.numel() * p.element_size() for p in model2.model.parameters()) / (1024**3)
@@ -84,97 +85,107 @@ class TenosaiMergeNode:
 
     def merge_tensors(self, tp1: torch.Tensor, tp2: torch.Tensor, amount: float, mode: str, 
                       dare_prune: float, dare_merge: float, weight1: float, sigmoid_str: float,
-                      mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if tp1.device != self.device: tp1 = tp1.to(self.device)
-        if tp2.device != self.device: tp2 = tp2.to(self.device)
-        if tp1.shape != tp2.shape: return tp1
-        if tp1.dtype != tp2.dtype: tp2 = tp2.to(tp1.dtype)
-        
+                      base_is_model1: bool, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if tp1.shape != tp2.shape:
+             self.logger.warning(f"Tensor shape mismatch, skipping merge for this tensor. Base: {tp1.shape}, Secondary: {tp2.shape}")
+             return tp1
+
+        original_dtype = tp1.dtype
+        calc_dtype = torch.float32
+        t1_calc = tp1.to(calc_dtype, copy=False)
+        t2_calc = tp2.to(calc_dtype, copy=False)
+
         if mode == "dare":
-            diff = torch.abs(tp1 - tp2)
-            n_elements = diff.numel()
-            if n_elements == 0: return tp1
-            sample_size = min(1_000_000, n_elements)
-            sample_indices = torch.randperm(n_elements, device=self.device)[:sample_size]
-            sample = diff.flatten()[sample_indices]
-            threshold_cpu = torch.quantile(sample.to('cpu').float(), dare_prune)
-            threshold = threshold_cpu.to(self.device)
+            diff = torch.abs(t1_calc - t2_calc)
+            threshold = torch.quantile(diff.flatten(), dare_prune)
             prune_mask = diff < threshold
-            merged = torch.lerp(tp1, tp2, dare_merge)
-            merged[prune_mask] = tp1[prune_mask]
+            merged = torch.lerp(t1_calc, t2_calc, dare_merge)
+            merged[prune_mask] = t1_calc[prune_mask]
         elif mode == "weighted_sum":
-            merged = torch.lerp(tp1, tp2, 1.0 - weight1)
+            weight_for_tp2 = 1.0 - weight1
+            merged = (t1_calc * (weight1 if base_is_model1 else weight_for_tp2)) + \
+                     (t2_calc * (weight_for_tp2 if base_is_model1 else weight1))
         elif mode == "sigmoid_average":
             weight = 1 / (1 + torch.exp(-12 * (sigmoid_str - 0.5)))
-            merged = torch.lerp(tp1, tp2, weight)
-        elif mode == "tensor_addition":
-            merged = tp1 + (tp2 * amount)
-        elif mode == "difference_maximization":
-            diff = torch.abs(tp1 - tp2)
-            max_diff = diff.max()
-            if max_diff == 0: return tp1
-            normalized_diff = diff / max_diff
-            merged = torch.lerp(tp1, tp2, normalized_diff)
+            merged = torch.lerp(t1_calc, t2_calc, weight)
         else:
-            merged = torch.lerp(tp1, tp2, amount)
+            merged = torch.lerp(t1_calc, t2_calc, amount)
+        
+        if mask is not None:
+             if mask.shape == merged.shape:
+                mask_calc = mask.to(merged.dtype, copy=False)
+                merged = torch.lerp(t1_calc, merged, mask_calc)
+             else:
+                self.logger.warning(f"Mask shape mismatch ignored. Mask: {mask.shape}, Tensor: {merged.shape}.")
 
-        if mask is not None and mask.shape == merged.shape:
-            merged = torch.lerp(tp1, merged, mask.to(merged.dtype, copy=False))
-        return merged
+        return merged.to(original_dtype)
 
     def get_block_from_key(self, key: str) -> str:
-        key_parts = key.split('.')
-        if "double_blocks" in key_parts or "input_blocks" in key_parts:
-            block_list_name = "double_blocks" if "double_blocks" in key_parts else "input_blocks"
-            idx = int(key_parts[key_parts.index(block_list_name) + 1])
-            if idx < 4: return EARLY_DOWNSAMPLING
-            if idx < 9: return MID_DOWNSAMPLING
-            return LATE_DOWNSAMPLING
-        elif "single_blocks" in key_parts or "output_blocks" in key_parts:
-            block_list_name = "single_blocks" if "single_blocks" in key_parts else "output_blocks"
-            idx = int(key_parts[key_parts.index(block_list_name) + 1])
-            if idx < 4: return EARLY_UPSAMPLING
-            if idx < 9: return MID_UPSAMPLING
-            return LATE_UPSAMPLING
-        elif "middle_block" in key: return CORE_MIDDLE_BLOCK
-        elif "out" in key_parts and key_parts[key_parts.index("out") - 1] == 'diffusion_model': return FINAL_OUTPUT_LAYER
-        elif "time_embed" in key: return TIME_EMBEDDING
-        elif "conditioner" in key or "cond_proj" in key: return TEXT_CONDITIONING
-        elif "input_hint_block" in key: return IMAGE_HINT
+        if "time_embed" in key: return TIME_EMBEDDING
+        if "conditioner" in key or "cond_proj" in key: return TEXT_CONDITIONING
+        if "input_hint_block" in key: return IMAGE_HINT
+        if "model.diffusion_model." not in key and "diffusion_model." not in key: return OTHER
+        if "middle_block" in key: return CORE_MIDDLE_BLOCK
+        if "output_blocks" in key:
+            try:
+                idx = int(key.split(".")[3 if key.startswith('model.') else 2])
+                if idx < 4: return EARLY_UPSAMPLING
+                if idx < 9: return MID_UPSAMPLING
+                return LATE_UPSAMPLING
+            except (ValueError, IndexError): return OTHER
+        if "input_blocks" in key:
+            try:
+                idx = int(key.split(".")[3 if key.startswith('model.') else 2])
+                if idx < 4: return EARLY_DOWNSAMPLING
+                if idx < 9: return MID_DOWNSAMPLING
+                return LATE_DOWNSAMPLING
+            except (ValueError, IndexError): return OTHER
+        if "out." in key: return FINAL_OUTPUT_LAYER
         return OTHER
 
-    def perform_block_merge(self, merged_model: Any, secondary_sd: Dict[str, torch.Tensor], settings: Dict) -> Dict:
+    def perform_block_merge(self, merged_model: Any, secondary_model: Any, settings: Dict) -> Dict:
         merged_params, kept_params, error_params = 0, 0, 0
         errors = []
         mask_sd = settings.get('mask_model').model.state_dict() if settings.get('mask_model') else None
+        base_is_model1 = settings['base_model_choice'] == 'model1'
+
+        secondary_sd = secondary_model.model.state_dict()
+        
         with torch.no_grad():
             for name, param in merged_model.model.named_parameters():
                 if name in secondary_sd:
                     try:
                         block_name = self.get_block_from_key(name)
                         amount = settings.get(block_name, 0.5)
-                        merged_tensor = self.merge_tensors(param.data, secondary_sd[name], amount, settings['merge_mode'],
+                        
+                        t1_base = param.data
+                        t2_secondary = secondary_sd[name]
+                        
+                        merged_tensor = self.merge_tensors(t1_base, t2_secondary, amount, settings['merge_mode'],
                                                            settings['dare_prune_amount'], settings['dare_merge_amount'],
                                                            settings['weight_1'], settings['sigmoid_strength'], 
-                                                           mask_sd.get(name) if mask_sd else None)
+                                                           base_is_model1, mask_sd.get(name) if mask_sd else None)
                         param.data.copy_(merged_tensor)
                         merged_params += 1
                     except Exception as e:
-                        self.logger.error(f"Error merging '{name}': {e}")
+                        self.logger.error(f"Error merging tensor '{name}': {e}", exc_info=True)
                         errors.append(f"{name}: {e}")
                         error_params += 1
                 else:
-                    self.logger.warning(f"Parameter '{name}' not found in secondary model. Kept from base.")
+                    self.logger.debug(f"Parameter '{name}' not found in secondary model. Kept from base.")
                     kept_params += 1
-        self.logger.info(f"Merge complete. Merged: {merged_params}, Kept: {kept_params}, Errors: {error_params}")
+
+        self.logger.info(f"Partial merge complete. Merged {merged_params} common tensors. Kept {kept_params} tensors unique to the base model. Errors: {error_params}")
         summary_info = settings.copy()
         summary_info.update({"components_merged": merged_params, "components_kept_from_base": kept_params, "errors": errors})
         return summary_info
 
     def generate_minimal_summary(self, size1: float, size2: float, final_size: float, base_model_choice: str, merge_info: Dict) -> str:
+        
         block_weights = {
-            key: val for key, val in merge_info.items() if isinstance(val, float) and key not in 
-            ['dare_prune_amount', 'dare_merge_amount', 'weight_1', 'sigmoid_strength']
+            key: val for key, val in merge_info.items() if isinstance(val, (float, int)) and key in 
+            [IMAGE_HINT, TIME_EMBEDDING, TEXT_CONDITIONING, EARLY_DOWNSAMPLING, MID_DOWNSAMPLING, LATE_DOWNSAMPLING,
+             CORE_MIDDLE_BLOCK, EARLY_UPSAMPLING, MID_UPSAMPLING, LATE_UPSAMPLING, FINAL_OUTPUT_LAYER, OTHER]
         }
         summary = {
             "base_model": base_model_choice,
@@ -190,6 +201,7 @@ class TenosaiMergeNode:
         elif merge_info['merge_mode'] == 'sigmoid_average':
              summary['settings']['sigmoid_strength'] = merge_info['sigmoid_strength']
         return json.dumps(summary, indent=4)
+
 
 NODE_CLASS_MAPPINGS = { "TenosaiMergeNode": TenosaiMergeNode }
 NODE_DISPLAY_NAME_MAPPINGS = { "TenosaiMergeNode": "Tenosai Merge (FLUX)" }
