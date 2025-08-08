@@ -54,6 +54,10 @@ This node prioritizes **predictability, reproducibility, and VRAM sanity**. You 
 
 ---
 
+
+<img width="558" height="1444" alt="image" src="https://github.com/user-attachments/assets/22532c88-b9b9-4de3-a1c6-4c90bdbc3238" />
+
+
 # Inputs (What They Do)
 
 ## Required
