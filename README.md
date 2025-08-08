@@ -236,7 +236,7 @@ This node prioritizes **predictability, reproducibility, and VRAM sanity**. You 
 | `weighted_sum`            | **Gate only**                 | > 0 = apply **global** `weight_1`; 0 = keep base     |    |   |    |    |
 | `sigmoid_average`         | **Yes**                       | Blended through sigmoid curve (softer tails)         |    |   |    |    |
 | `tensor_addition`         | **Yes**                       | Add scaled delta (`t2 - t1`)                         |    |   |    |    |
-| `difference_maximization` | **Yes**                       | Strength when \`t2 > t1 \`                           |    |   |    |    |
+| `difference_maximization` | **Yes**                       | Strength when (`t2 > t1`)                            |    |   |    |    |
 | `auto_similarity`         | **Yes**                       | Scales auto weight from cosine similarity            |    |   |    |    |
 | `dare`                    | **Yes**                       | Strength only on **unpruned** elements (after prune) |    |   |    |    |
 
