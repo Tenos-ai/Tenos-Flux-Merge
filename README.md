@@ -1,8 +1,8 @@
 # Tenos.ai Merge Node (Flux+ Deterministic) for ComfyUI
 
-A robust, **Flux-aware** merge node for ComfyUI with **deterministic DARE**, extra merge modes, a **block-weight preset library**, regex and model-based **masks**, safety **skip/lock** toggles, and an **analysis-only** dry run. It’s designed for **FLUX-style UNets** (and generally works with SD-like models that follow similar block naming).
+A robust, **Flux-aware** merge node for ComfyUI with **deterministic DARE**, extra merge modes, a **block-weight preset library**, regex and model-based **masks**, safety **skip/lock** toggles, and an **analysis-only** dry run. Designed for **FLUX-style UNets** (and generally compatible with SD-like networks that follow similar block naming).
 
-The node prioritizes **predictability, reproducibility, and VRAM sanity**. You choose the base model, control per-block weights (or one-click presets), and get a clean **JSON summary** with fingerprints so you can rerun the exact merge later.
+This node prioritizes **predictability, reproducibility, and VRAM sanity**. You choose the base model, control per-block weights (or use one-click presets), and get a clean **JSON summary** with fingerprints so you can re-run the exact merge later.
 
 ---
 
@@ -11,7 +11,7 @@ The node prioritizes **predictability, reproducibility, and VRAM sanity**. You c
 1. **Install**
 
    * Copy `tenos_merge.py` into `ComfyUI/custom_nodes/`
-   * Restart ComfyUI (kill the process; don’t just Reload Nodes)
+   * **Fully restart** ComfyUI (kill the process; don’t just “Reload Nodes”)
 
 2. **Add the node**
 
@@ -25,55 +25,55 @@ The node prioritizes **predictability, reproducibility, and VRAM sanity**. You c
 4. **Pick base & mode**
 
    * `base_model_choice` = the weights you start from
-   * `merge_mode` = algorithm (see list below)
+   * `merge_mode` = algorithm (see “Merge Modes”)
 
 5. **Choose weights**
 
-   * Either pick a **preset** (`block_preset` + toggle `apply_preset`)
-   * …or dial each **block slider** manually (0.0 = keep base, 1.0 = take secondary)
+   * Pick a **preset** (`block_preset` + toggle `apply_preset`) **or**
+   * Dial **block sliders** manually (0.0 = keep base, 1.0 = take secondary)
 
 6. **(Optional) Safety & Masks**
 
-   * Use **skip\_/lock\_** toggles to protect sensitive parts
+   * Use **skip\_ / lock\_** toggles to protect sensitive parts
    * Use a **mask\_model** or **mask\_regex** to target specific params
 
 7. **Run**
 
-   * `MODEL` → merged model (feed to KSampler or SaveModel)
-   * `STRING` → JSON summary (for audit + reproducibility)
+   * `MODEL` → merged model (send to KSampler or SaveModel)
+   * `STRING` → JSON summary (audit + reproducibility)
 
 ---
 
 # Installation & Compatibility
 
-* Copy `tenos_merge.py` to `ComfyUI/custom_nodes/` and restart
+* Put `tenos_merge.py` in `ComfyUI/custom_nodes/`, restart ComfyUI
 * Node appears as **“Tenosai Merge (Flux+ Deterministic)”**
-* Optimized for **Flux-style** UNets; works broadly with SD-like models using:
+* Optimized for Flux-style UNets; generally works with SD-like models using:
 
   * `input_blocks.*`, `output_blocks.*`, `middle_block` (or `mid_block`)
 
 ---
 
-# Inputs & What They Mean
+# Inputs (What They Do)
 
 ## Required
 
-* `model1`, `model2` *(MODEL)* – the two models to merge
-* `base_model_choice` *(model1 | model2)* – which model’s weights you start from
-* `merge_mode`
+* **`model1`, `model2`** *(MODEL)* – the two models to be merged
+* **`base_model_choice`** *(model1 | model2)* – which model’s weights you start from
+* **`merge_mode`**
 
   * `simple` – Linear interpolation (lerp)
   * `dare` – Deterministic DARE: prune smallest diffs, merge the rest
-  * `weighted_sum` – `weight_1 * model1 + (1-weight_1) * model2` (independent of base)
-  * `sigmoid_average` – Nonlinear remap of `amount` via sigmoid for softer blending
+  * `weighted_sum` – `weight_1*model1 + (1-weight_1)*model2` (independent of base)
+  * `sigmoid_average` – Nonlinear remap of amount via sigmoid for softer blending
   * `tensor_addition` – Explicit delta: `t1 + amount * (t2 - t1)`
   * `difference_maximization` – Emphasize where `|t2| > |t1|`
   * `auto_similarity` – Cosine similarity per param scales effective blend automatically
 
 ## Preset Library (Block Weights)
 
-* `block_preset` *(Custom, Balanced, Style-lean, Subject-lean, Text-obedient, Structure-keeper, Detail-boost, Minimal-change)*
-* `apply_preset` *(bool)* – when **on**, preset **overrides all sliders** before merging
+* **`block_preset`** *(Custom, Balanced, Style-lean, Subject-lean, Text-obedient, Structure-keeper, Detail-boost, Minimal-change)*
+* **`apply_preset`** *(bool)* — when **on**, the preset **overrides all sliders** before merging
 
 ### What each preset is for
 
@@ -87,7 +87,7 @@ The node prioritizes **predictability, reproducibility, and VRAM sanity**. You c
 | Detail-boost     | Sharpen details; upsampling heavy                   |
 | Minimal-change   | Very light touch; exploratory                       |
 
-**Exact weights** (0.0 keep base ←→ 1.0 take secondary):
+**Exact preset weights** (0.0 keep base ←→ 1.0 take secondary):
 
 ```json
 {
@@ -140,34 +140,107 @@ The node prioritizes **predictability, reproducibility, and VRAM sanity**. You c
 
 ## Block Weights (Manual)
 
-* `Image Hint` – IP-Adapter / control influence
-* `Timestep Embedding` – how the model interprets noise level
-* `Text Conditioning` – prompt adherence
-* `Early Downsampling (Composition)` – composition & layout
-* `Mid Downsampling (Subject & Concept)` – subject identity & concepts
-* `Late Downsampling (Refinement)` – pre-style refinement
-* `Core Middle Block` – global style/identity
-* `Early/Mid/Late Upsampling` – detail creation & textures
-* `Final Output Layer` – output head / latent projection
-* `Other` – anything not matched by the heuristics
+* **Image Hint** – IP-Adapter / control influence
+* **Timestep Embedding** – how the model interprets noise level
+* **Text Conditioning** – prompt adherence
+* **Early Downsampling (Composition)** – composition & layout
+* **Mid Downsampling (Subject & Concept)** – subject identity & concepts
+* **Late Downsampling (Refinement)** – pre-style refinement
+* **Core Middle Block** – global style / identity
+* **Early/Mid/Late Upsampling** – detail creation & textures
+* **Final Output Layer** – output head / latent projection
+* **Other** – anything not matched by the heuristics
 
 **Rule of thumb:** Downsampling = *what*, Upsampling = *how it looks*, Middle = *style core*.
 
-## Mode-Specific Settings
+## Mode-Specific Settings (Plain English)
 
-* **DARE**
+**Context:** Every block has a **slider** (0.0–1.0) used as the **blend amount**. Some modes add extra knobs. The slider and those knobs work **together** as described below.
 
-  * `dare_prune_amount` (0.0–1.0): fraction of the **smallest** diffs pruned by quantile of `|t2 - t1|`
-  * `dare_merge_amount` (0.0–1.0): strength applied to the unpruned elements
-* **weighted\_sum**
+### 1) `simple` — linear blend
 
-  * `weight_1` (0.0–1.0): fraction of `model1`; `model2` gets `1 - weight_1` (independent of base)
-* **sigmoid\_average**
+* **What:** Straight crossfade between base and secondary.
+* **Uses slider?** **Yes** (directly).
+* **Extra knobs:** none.
+* **Use when:** Baseline blending; “more of model2 here.”
+* **Try:** 0.2–0.6 on the blocks you care about.
+* **Pitfall:** If models disagree wildly, can look muddy → consider `auto_similarity` or `dare`.
 
-  * `sigmoid_strength` (0.1–12.0): slope of the nonlinear blend
-* **auto\_similarity**
+### 2) `weighted_sum` — global average
 
-  * `auto_k` (1.0–20.0): steepness mapping `(1 - cosine)` to effective weight
+* **What:** `final = weight_1*model1 + (1-weight_1)*model2` **for every merged block**.
+* **Uses slider?** **Gate only.** Slider > 0 applies the **same** global mix; 0 keeps base.
+* **Extra knobs:** `weight_1` (0..1) — always refers to **model1**.
+* **Use when:** You want a clean, consistent “70/30” style global blend.
+* **Try:** `weight_1 = 0.5` to start; nudge to 0.6–0.8 if base should dominate.
+* **Pitfall:** Sliders don’t shape ratio (beyond on/off). For per-block nuance, use `simple`/`auto_similarity`.
+
+### 3) `sigmoid_average` — gentler crossfade
+
+* **What:** Same as `simple`, but remaps the slider through a **sigmoid**.
+* **Uses slider?** **Yes** (curved).
+* **Extra knobs:** `sigmoid_strength` (higher = steeper middle).
+* **Use when:** Softer, less brittle transitions (style transfer without harsh artifacts).
+* **Try:** sliders 0.3–0.7; `sigmoid_strength = 2–4`.
+* **Pitfall:** Very high strength “snaps” near the middle.
+
+### 4) `tensor_addition` — explicit delta
+
+* **What:** `final = t1 + amount * (t2 - t1)` (equivalent to `simple`, framed as applying **delta**).
+* **Uses slider?** **Yes** (linearly).
+* **Extra knobs:** none.
+* **Use when:** You think in terms of “add model2’s change” on top of model1.
+* **Try:** 0.2–0.5.
+
+### 5) `difference_maximization` — let the stronger signal win
+
+* **What:** Where `|t2| > |t1|`, lean toward model2; else keep model1. Slider controls **strength** of leaning.
+* **Uses slider?** **Yes** (strength).
+* **Extra knobs:** none.
+* **Use when:** Push style/details where model2 is clearly stronger **without** washing out model1 elsewhere.
+* **Try:** 0.2–0.5 on mid/late upsampling; keep `skip_norms` on.
+* **Pitfall:** Can amplify noise with incompatible models.
+
+### 6) `auto_similarity` — smart blend by cosine
+
+* **What:** Per-param **cosine similarity**; if tensors are similar → small change; if different → larger change.
+  Effective amount = **slider × auto-weight**.
+* **Uses slider?** **Yes** (scales the auto weight).
+* **Extra knobs:** `auto_k` (higher = more aggressive when difference is high).
+* **Use when:** Great default: preserve stable layers, lean into meaningful differences.
+* **Try:** sliders 0.25–0.6; `auto_k = 4–8`.
+* **Pitfall:** If models are wildly different, it’ll go big everywhere → lower sliders or `auto_k`.
+
+### 7) `dare` — deterministic DARE
+
+* **What:**
+
+  1. Compute `diff = |t2 - t1|`
+  2. **Prune** smallest diffs via quantile (`dare_prune_amount`)
+  3. On the **unpruned** elements, blend using **slider × `dare_merge_amount`**
+     Deterministic: quantile in float32 for stable thresholds.
+* **Uses slider?** **Yes** (strength on **kept** elements).
+* **Extra knobs:**
+
+  * `dare_prune_amount` (0..1): fraction of smallest diffs to ignore
+  * `dare_merge_amount` (0..1): cap/scale of merge strength on kept parts
+* **Use when:** Bring a **fine-tune** into a base, keeping only the **important** changes.
+* **Try:** `dare_prune_amount = 0.05–0.15`, `dare_merge_amount = 1.0`; normal sliders in the blocks you want.
+* **Pitfall:** Too much prune = “nothing changed”; too little = regular blend. Keep `skip_norms` on.
+
+#### Slider interaction cheat sheet
+
+| Mode                      | Does the block slider matter? | How it’s used                                        |    |   |    |    |
+| ------------------------- | ----------------------------- | ---------------------------------------------------- | -- | - | -- | -- |
+| `simple`                  | **Yes**                       | Direct linear blend                                  |    |   |    |    |
+| `weighted_sum`            | **Gate only**                 | > 0 = apply **global** `weight_1`; 0 = keep base     |    |   |    |    |
+| `sigmoid_average`         | **Yes**                       | Blended through sigmoid curve (softer tails)         |    |   |    |    |
+| `tensor_addition`         | **Yes**                       | Add scaled delta (`t2 - t1`)                         |    |   |    |    |
+| `difference_maximization` | **Yes**                       | Strength when \`                                     | t2 | > | t1 | \` |
+| `auto_similarity`         | **Yes**                       | Scales auto weight from cosine similarity            |    |   |    |    |
+| `dare`                    | **Yes**                       | Strength only on **unpruned** elements (after prune) |    |   |    |    |
+
+---
 
 ## Safety Toggles (Skip / Lock)
 
@@ -179,33 +252,32 @@ The node prioritizes **predictability, reproducibility, and VRAM sanity**. You c
 | `lock_conditioner`  | Text conditioning & related projections                     | Maintain prompt adherence while changing style/identity elsewhere |
 | `lock_output_layer` | Final projection / head (e.g., `to_rgb`, `out.`, `final_*`) | Avoid breaking the last conversion stage                          |
 
+**Tip:** Turn on `skip_norms` by default. Use locks when you want **minimum drift** in those areas.
+
 ---
 
-# Masks (Targeted Control)
+## Masks (Targeted Control)
 
-**Semantics:** after the per-block merge computes a candidate `merged`, the mask blends it with the original base tensor:
+**Semantics:** after computing a candidate `merged` value for a parameter, the mask blends it with the **base** value:
 
 ```
 final = lerp(base_param, merged_param, mask)
-# mask=0.0 → keep base; mask=1.0 → take merged
+# mask = 0.0 → keep base; mask = 1.0 → take merged
 ```
 
 ### Two ways to provide a mask
 
-1. **mask\_model (per-param masks by name)**
-   If `mask_model` has a tensor with the same name, that tensor is used as the mask.
+1. **`mask_model`** — a third model whose tensors (by **same name**) act as masks.
+2. **`mask_regex` + `mask_value`** — create a **constant mask** where the param name matches the regex.
 
-2. **mask\_regex + mask\_value (constant mask on matches)**
-   If a param name matches `mask_regex`, a constant mask filled with `mask_value` is used.
-
-**Precedence:** `mask_model` overrides for names it covers; regex applies to the rest.
+**Precedence:** `mask_model` wins for names it covers; regex applies to the rest.
 
 **Broadcasting supported:**
 
-* Exact same shape – used as-is
+* exact same shape → used as-is
 * `[C,1,1]` or `[C]` → broadcast to conv weights `[C,H,W,...]`
-* Scalar → broadcast to any shape
-  If a mask can’t be broadcast, it’s ignored with a warning.
+* scalar → broadcast to any shape
+  If a mask can’t be broadcast, it’s ignored (warning in console).
 
 ### Regex cookbook (Python syntax; escape dots)
 
@@ -236,24 +308,24 @@ final = lerp(base_param, merged_param, mask)
 
 ---
 
-# Execution Controls
+## Execution Controls
 
-* `analysis_only` – **dry run**: returns summary, doesn’t modify weights
-* `calc_dtype` – math dtype (`float32` or `bfloat16`). Final params keep their original dtype.
-* `seed` – sets torch seeds for deterministic behavior
+* **`analysis_only`** — **dry run**: returns JSON summary; doesn’t modify weights
+* **`calc_dtype`** — math dtype (`float32` or `bfloat16`). Final params keep original dtype.
+* **`seed`** — sets torch seeds for deterministic behavior
 
 ---
 
 # Outputs
 
-* `MODEL` – the merged model
-* `STRING` – JSON summary with:
+* **`MODEL`** — the merged model
+* **`STRING`** — JSON summary including:
 
-  * sizes (GB) of model1, model2, final
-  * merge mode + full settings (including preset name/applied)
-  * preflight counts (missing/shape-mismatch)
-  * run info (seed + fingerprints of key sets)
-  * result stats (merged/kept counts, up to 50 error lines)
+  * Sizes (GB) for model1, model2, final
+  * Merge mode + full settings (including **preset name/applied**)
+  * Preflight counts (missing in base/secondary, shape mismatches)
+  * Run info (seed + **key-set fingerprints**)
+  * Result counts (merged/kept, up to 50 error lines)
 
 **Example JSON (trimmed):**
 
@@ -301,62 +373,47 @@ Heuristics are designed to work across Flux and SD-like repos.
 
 # Recipes
 
-* **Style over structure**
+**Style over structure**
 
-  * Base = structure model
-  * Raise **Core Middle Block** + **Upsampling** weights
-  * Keep `skip_norms` on
+* Base = structure model
+* Raise **Core Middle Block** + **Upsampling**
+* `skip_norms` ON
 
-* **Concept blending**
+**Concept blending**
 
-  * Raise **Downsampling** weights (subject/identity lives there)
+* Raise **Downsampling** (subject/identity lives there)
 
-* **Auto as smart default**
+**Auto as smart default**
 
-  * Use `auto_similarity` with moderate weights; it preserves layers that agree and leans into layers that differ
+* `auto_similarity` with moderate sliders preserves stable parts, leans into meaningful diffs
 
-* **Fine-tune into base (DARE)**
+**Fine-tune into base (DARE)**
 
-  * `dare_prune_amount` 0.05–0.15, `dare_merge_amount` 1.0
-  * Adjust per-block amounts normally
+* `dare_prune_amount` **0.05–0.15**, `dare_merge_amount` **1.0**
+* Adjust block sliders normally
 
-* **Keep fragile parts steady**
+**Keep fragile parts steady**
 
-  * Turn on `skip_norms` and (often) `skip_bias`
-  * Lock `time_embed`, `conditioner`, `output_layer` for minimal drift
+* `skip_norms` and often `skip_bias` ON
+* Lock `time_embed`, `conditioner`, `output_layer` for minimal drift
 
 ---
 
 # Troubleshooting
 
-* **Node not found / old UI appears**
-
-  * You’re loading an older file. Remove duplicates in `custom_nodes/`, delete `__pycache__`, restart Comfy.
-
-* **Nothing seems to change**
-
-  * Check per-block sliders; `0.0` means “keep base”.
-  * In DARE, large `dare_prune_amount` can hide changes.
-
-* **VRAM pressure**
-
-  * Use `calc_dtype = bfloat16`. The math uses less memory; write-back preserves original dtype.
-
-* **Weird behavior in weighted\_sum**
-
-  * By design, `weight_1` always maps to **model1**, independent of base choice (predictable semantics).
-
-* **Import error at startup**
-
-  * Comfy will skip the node silently. Check the console for a traceback; fix the file or send the error here.
+* **Node not found / old UI appears** — You’re loading an older file. Remove duplicates in `custom_nodes/`, delete `__pycache__`, restart Comfy.
+* **Nothing changes** — Check block sliders; `0.0` means “keep base”. In DARE, too high prune can mask changes.
+* **VRAM pressure** — Use `calc_dtype = bfloat16`. Math uses less memory; write-back preserves original dtype.
+* **Weighted sum feels “different”** — By design: `weight_1` **always** maps to **model1**, independent of base (predictable semantics).
+* **Import error** — Comfy will skip the node. Check the console traceback; fix the file or ping the error.
 
 ---
 
 # Reproducibility & Licensing
 
 * Set `seed` for deterministic merges.
-* Summary includes **key-set fingerprints**. If fingerprints differ, you are not merging the same models.
-* Respect the licenses of the models you’re merging. You are responsible for redistribution rights.
+* Summary includes **key-set fingerprints** — if they differ, you’re not merging the same models.
+* Respect original model licenses; you’re responsible for redistribution rights.
 
 ---
 
