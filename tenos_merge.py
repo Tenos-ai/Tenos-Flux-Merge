@@ -104,7 +104,8 @@ def _is_bias(name: str) -> bool:
 
 
 def _is_time_embed(name: str) -> bool:
-    return ("time_embed" in name.lower()) or ("time_embedding" in name.lower())
+    low = name.lower()
+    return ("time_embed" in low) or ("time_embedding" in low)
 
 
 def _is_conditioner(name: str) -> bool:
@@ -192,6 +193,40 @@ def _sha1_of_state_dict_keys(sd: Dict[str, torch.Tensor]) -> str:
         t = sd[k]
         h.update(str(tuple(t.shape)).encode("utf-8"))
     return h.hexdigest()[:12]
+
+
+def _safe_quantile_threshold(diff: torch.Tensor, q: float) -> torch.Tensor:
+    """
+    Deterministic, robust quantile threshold for very large tensors.
+    Tries device quantile -> CPU quantile -> CPU kthvalue.
+    Always operates in float32 for stability. Returns a scalar tensor on diff.device.
+    """
+    q = float(max(0.0, min(1.0, q)))
+    flat = diff.reshape(-1).to(torch.float32)
+    if q <= 0.0:
+        return torch.tensor(0.0, dtype=torch.float32, device=diff.device)
+    if q >= 1.0:
+        return torch.tensor(float("inf"), dtype=torch.float32, device=diff.device)
+
+    # 1) Try quantile on current device
+    try:
+        return torch.quantile(flat, q)
+    except Exception:
+        pass
+
+    # 2) Try quantile on CPU
+    try:
+        th = torch.quantile(flat.cpu(), q)
+        return th.to(diff.device)
+    except Exception:
+        pass
+
+    # 3) Exact threshold via kthvalue on CPU
+    n = flat.numel()
+    # kthvalue is effectively 1-indexed range, clamp to [1, n]
+    k = max(1, min(n, int(q * n)))
+    th = flat.cpu().kthvalue(k).values
+    return th.to(diff.device)
 
 
 class TenosaiMergeNode:
@@ -402,6 +437,9 @@ class TenosaiMergeNode:
                 seed=seed,
                 base_keys_fingerprint=_sha1_of_state_dict_keys(base_sd),
                 sec_keys_fingerprint=_sha1_of_state_dict_keys(sec_sd),
+                errors=None,
+                merged_count=None,
+                kept_count=None,
                 preset_name=preset_name,
                 preset_applied=preset_applied,
             )
@@ -510,7 +548,7 @@ class TenosaiMergeNode:
         weight1: float,
         sigmoid_strength: float,
         auto_k: float,
-        base_is_model1: bool,
+        base_is_model1: bool,  # kept for future semantics; not used directly now
         mask: Optional[torch.Tensor],
         calc_dtype: torch.dtype,
     ) -> torch.Tensor:
@@ -548,7 +586,7 @@ class TenosaiMergeNode:
 
         elif mode == "auto_similarity":
             cos = _cosine_similarity(t1_calc, t2_calc)  # scalar tensor
-            # high difference -> larger (1 - cos) -> larger weight
+            # higher difference -> larger (1 - cos) -> larger weight
             w = 1.0 / (1.0 + torch.exp(torch.tensor(-auto_k * (1.0 - float(cos)), dtype=t1_calc.dtype, device=t1_calc.device)))
             eff = amount * float(w)
             merged = _lerp(t1_calc, t2_calc, eff)
@@ -562,7 +600,7 @@ class TenosaiMergeNode:
             elif q >= 1.0:
                 prune_mask = torch.ones_like(diff, dtype=torch.bool, device=diff.device)
             else:
-                threshold = torch.quantile(diff.flatten().to(torch.float32), q)
+                threshold = _safe_quantile_threshold(diff, q)
                 prune_mask = diff < threshold
 
             candidate = _lerp(t1_calc, t2_calc, amount * dare_merge)
@@ -652,10 +690,10 @@ class TenosaiMergeNode:
             }
             if errors:
                 # cap to avoid massive UI strings
-                summary["errors_detail"] = list(map(str, errors[:50]))
+                summary["errors_detail"] = [str(e) for e in errors[:50]]
         return json.dumps(summary, indent=2)
 
 
 # ---- ComfyUI registration ----
 NODE_CLASS_MAPPINGS = {"TenosaiMergeNode": TenosaiMergeNode}
-NODE_DISPLAY_NAME_MAPPINGS = {"TenosaiMergeNode": "Tenos.ai Model Merge Node (Flux)"}
+NODE_DISPLAY_NAME_MAPPINGS = {"TenosaiMergeNode": "Tenos.ai Model Node Merge (Flux)"}
