@@ -696,4 +696,4 @@ class TenosaiMergeNode:
 
 # ---- ComfyUI registration ----
 NODE_CLASS_MAPPINGS = {"TenosaiMergeNode": TenosaiMergeNode}
-NODE_DISPLAY_NAME_MAPPINGS = {"TenosaiMergeNode": "Tenos.ai Model Node Merge (Flux)"}
+NODE_DISPLAY_NAME_MAPPINGS = {"TenosaiMergeNode": "Tenos.ai Model Merge Node (Flux)"}
