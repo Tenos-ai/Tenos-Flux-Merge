@@ -1,4 +1,4 @@
-# Tenos.ai Merge Node (Flux+ Deterministic) for ComfyUI
+# Tenos.ai Model Merge Node (Flux) for ComfyUI
 
 A robust, **Flux-aware** merge node for ComfyUI with **deterministic DARE**, extra merge modes, a **block-weight preset library**, regex and model-based **masks**, safety **skip/lock** toggles, and an **analysis-only** dry run. Designed for **FLUX-style UNets** (and generally compatible with SD-like networks that follow similar block naming).
 
