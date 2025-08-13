@@ -11,11 +11,13 @@ import comfy.model_management as model_management
 
 
 # =========================
-# UI Labels (kept stable for backwards-compatibility with your graphs)
+# UI Labels (stable: do not rename, used in graphs)
 # =========================
 IMAGE_HINT = "Image Hint"
 TIME_EMBEDDING = "Timestep Embedding"
 TEXT_CONDITIONING = "Text Conditioning"
+GUIDANCE_EMBEDDING = "Guidance Embedding"        
+VECTOR_EMBEDDING = "Vector Embedding"            
 EARLY_DOWNSAMPLING = "Early Downsampling (Composition)"
 MID_DOWNSAMPLING = "Mid Downsampling (Subject & Concept)"
 LATE_DOWNSAMPLING = "Late Downsampling (Refinement)"
@@ -33,42 +35,49 @@ OTHER = "Other"
 PRESETS: Dict[str, Dict[str, float]] = {
     "Balanced": {
         IMAGE_HINT: 0.50, TIME_EMBEDDING: 0.50, TEXT_CONDITIONING: 0.50,
+        GUIDANCE_EMBEDDING: 0.50, VECTOR_EMBEDDING: 0.50,
         EARLY_DOWNSAMPLING: 0.50, MID_DOWNSAMPLING: 0.50, LATE_DOWNSAMPLING: 0.50,
         CORE_MIDDLE_BLOCK: 0.50, EARLY_UPSAMPLING: 0.50, MID_UPSAMPLING: 0.50, LATE_UPSAMPLING: 0.50,
         FINAL_OUTPUT_LAYER: 0.50, OTHER: 0.50
     },
     "Style-lean": {
         IMAGE_HINT: 0.50, TIME_EMBEDDING: 0.50, TEXT_CONDITIONING: 0.50,
+        GUIDANCE_EMBEDDING: 0.40, VECTOR_EMBEDDING: 0.40,
         EARLY_DOWNSAMPLING: 0.30, MID_DOWNSAMPLING: 0.40, LATE_DOWNSAMPLING: 0.50,
         CORE_MIDDLE_BLOCK: 0.80, EARLY_UPSAMPLING: 0.75, MID_UPSAMPLING: 0.85, LATE_UPSAMPLING: 0.90,
         FINAL_OUTPUT_LAYER: 0.60, OTHER: 0.50
     },
     "Subject-lean": {
         IMAGE_HINT: 0.50, TIME_EMBEDDING: 0.50, TEXT_CONDITIONING: 0.50,
+        GUIDANCE_EMBEDDING: 0.60, VECTOR_EMBEDDING: 0.60,
         EARLY_DOWNSAMPLING: 0.80, MID_DOWNSAMPLING: 0.80, LATE_DOWNSAMPLING: 0.70,
         CORE_MIDDLE_BLOCK: 0.60, EARLY_UPSAMPLING: 0.45, MID_UPSAMPLING: 0.40, LATE_UPSAMPLING: 0.35,
         FINAL_OUTPUT_LAYER: 0.50, OTHER: 0.50
     },
     "Text-obedient": {
         IMAGE_HINT: 0.25, TIME_EMBEDDING: 0.60, TEXT_CONDITIONING: 0.85,
+        GUIDANCE_EMBEDDING: 0.60, VECTOR_EMBEDDING: 0.50,
         EARLY_DOWNSAMPLING: 0.55, MID_DOWNSAMPLING: 0.55, LATE_DOWNSAMPLING: 0.50,
         CORE_MIDDLE_BLOCK: 0.55, EARLY_UPSAMPLING: 0.50, MID_UPSAMPLING: 0.50, LATE_UPSAMPLING: 0.50,
         FINAL_OUTPUT_LAYER: 0.50, OTHER: 0.50
     },
     "Structure-keeper": {
         IMAGE_HINT: 0.30, TIME_EMBEDDING: 0.40, TEXT_CONDITIONING: 0.50,
+        GUIDANCE_EMBEDDING: 0.40, VECTOR_EMBEDDING: 0.40,
         EARLY_DOWNSAMPLING: 0.20, MID_DOWNSAMPLING: 0.25, LATE_DOWNSAMPLING: 0.30,
         CORE_MIDDLE_BLOCK: 0.40, EARLY_UPSAMPLING: 0.40, MID_UPSAMPLING: 0.40, LATE_UPSAMPLING: 0.40,
         FINAL_OUTPUT_LAYER: 0.40, OTHER: 0.20
     },
     "Detail-boost": {
         IMAGE_HINT: 0.50, TIME_EMBEDDING: 0.50, TEXT_CONDITIONING: 0.50,
+        GUIDANCE_EMBEDDING: 0.50, VECTOR_EMBEDDING: 0.50,
         EARLY_DOWNSAMPLING: 0.35, MID_DOWNSAMPLING: 0.40, LATE_DOWNSAMPLING: 0.45,
         CORE_MIDDLE_BLOCK: 0.65, EARLY_UPSAMPLING: 0.75, MID_UPSAMPLING: 0.85, LATE_UPSAMPLING: 0.90,
         FINAL_OUTPUT_LAYER: 0.65, OTHER: 0.50
     },
     "Minimal-change": {
         IMAGE_HINT: 0.10, TIME_EMBEDDING: 0.10, TEXT_CONDITIONING: 0.10,
+        GUIDANCE_EMBEDDING: 0.10, VECTOR_EMBEDDING: 0.10,
         EARLY_DOWNSAMPLING: 0.10, MID_DOWNSAMPLING: 0.10, LATE_DOWNSAMPLING: 0.10,
         CORE_MIDDLE_BLOCK: 0.10, EARLY_UPSAMPLING: 0.10, MID_UPSAMPLING: 0.10, LATE_UPSAMPLING: 0.10,
         FINAL_OUTPUT_LAYER: 0.10, OTHER: 0.10
@@ -77,9 +86,10 @@ PRESETS: Dict[str, Dict[str, float]] = {
 
 
 # =========================
-# Helper utilities
+# Helpers
 # =========================
 def _device() -> torch.device:
+    """Comfy’s preferred device, with CPU fallback."""
     try:
         return model_management.get_torch_device()
     except Exception:
@@ -87,10 +97,9 @@ def _device() -> torch.device:
 
 
 def _clone_model(model_obj):
-    # Prefer native clone if available (Comfy's ModelPatcher often exposes .clone)
+    """Clone without mutating the original graph model."""
     if hasattr(model_obj, "clone") and callable(getattr(model_obj, "clone")):
         return model_obj.clone()
-    # Fallback is a deep copy
     return copy.deepcopy(model_obj)
 
 
@@ -105,12 +114,12 @@ def _is_bias(name: str) -> bool:
 
 def _is_time_embed(name: str) -> bool:
     low = name.lower()
-    return ("time_embed" in low) or ("time_embedding" in low)
+    return ("time_embed" in low) or ("time_embedding" in low) or ("time_in" in low)
 
 
 def _is_conditioner(name: str) -> bool:
     low = name.lower()
-    return any(k in low for k in ["text", "cond", "token", "clip", "context"])
+    return any(k in low for k in ["text", "cond", "token", "clip", "context", "txt_in"])
 
 
 def _is_out_proj(name: str) -> bool:
@@ -118,11 +127,46 @@ def _is_out_proj(name: str) -> bool:
     return any(k in low for k in ["to_rgb", "out.", "output_layer", "final_layer"])
 
 
+def _is_guidance(name: str) -> bool:
+    low = name.lower()
+    return ("guidance_in" in low) or ("guidance" in low and "embed" in low)
+
+
+def _is_vector(name: str) -> bool:
+    low = name.lower()
+    return ("vector_in" in low) or ("vector" in low and "embed" in low)
+
+
 def _block_from_key(name: str) -> str:
-    """Map parameter names to functional UI blocks (heuristic, but consistent)."""
+    """
+    Map parameter names to functional UI blocks.
+    Supports Flux-style (double_blocks/single_blocks) and SD-style (input_blocks/output_blocks),
+    plus Flux inlet heads and final head.
+    """
     low = name.lower()
 
-    # Down path
+    # Flux-style UNet: down = double_blocks.*, up = single_blocks.*
+    m_db = re.search(r"(?:^|[._])double_blocks\.(\d+)", low)
+    if m_db:
+        idx = int(m_db.group(1))
+        if idx <= 2:
+            return EARLY_DOWNSAMPLING
+        elif idx <= 4:
+            return MID_DOWNSAMPLING
+        else:
+            return LATE_DOWNSAMPLING
+
+    m_sb = re.search(r"(?:^|[._])single_blocks\.(\d+)", low)
+    if m_sb:
+        idx = int(m_sb.group(1))
+        if idx <= 2:
+            return EARLY_UPSAMPLING
+        elif idx <= 4:
+            return MID_UPSAMPLING
+        else:
+            return LATE_UPSAMPLING
+
+    # SD-style for broad compatibility
     m_in = re.search(r"input_blocks\.(\d+)", low)
     if m_in:
         idx = int(m_in.group(1))
@@ -133,7 +177,6 @@ def _block_from_key(name: str) -> str:
         else:
             return LATE_DOWNSAMPLING
 
-    # Up path
     m_out = re.search(r"output_blocks\.(\d+)", low)
     if m_out:
         idx = int(m_out.group(1))
@@ -150,23 +193,25 @@ def _block_from_key(name: str) -> str:
         return TIME_EMBEDDING
     if _is_conditioner(low):
         return TEXT_CONDITIONING
-    if (("image" in low) and ("hint" in low)) or ("ipadapter" in low) or ("control" in low):
+    if (("image" in low) and ("hint" in low)) or ("ipadapter" in low) or ("control" in low) or ("img_in" in low):
         return IMAGE_HINT
+    if _is_guidance(low):      # NEW
+        return GUIDANCE_EMBEDDING
+    if _is_vector(low):        # NEW
+        return VECTOR_EMBEDDING
     if _is_out_proj(low):
         return FINAL_OUTPUT_LAYER
     return OTHER
 
 
 def _broadcast_mask_like(mask: torch.Tensor, target: torch.Tensor) -> Optional[torch.Tensor]:
-    """Broadcast useful mask shapes to the target param shape."""
+    """Broadcast common shapes to target parameter shape."""
     if mask is None:
         return None
     if tuple(mask.shape) == tuple(target.shape):
         return mask
-    # scalar -> fill
     if mask.numel() == 1:
         return torch.full_like(target, float(mask.item()))
-    # Channel broadcast for conv weights [C, H, W, ...]
     if target.ndim >= 3:
         c = target.shape[0]
         if mask.ndim == 3 and mask.shape == (c, 1, 1):
@@ -178,6 +223,7 @@ def _broadcast_mask_like(mask: torch.Tensor, target: torch.Tensor) -> Optional[t
 
 
 def _cosine_similarity(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Scalar cosine similarity in float32 for stability."""
     a_f = a.flatten().to(torch.float32)
     b_f = b.flatten().to(torch.float32)
     denom = (a_f.norm() * b_f.norm())
@@ -187,6 +233,7 @@ def _cosine_similarity(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 
 
 def _sha1_of_state_dict_keys(sd: Dict[str, torch.Tensor]) -> str:
+    """Fingerprint of keys + shapes (not values)."""
     h = hashlib.sha1()
     for k in sorted(sd.keys()):
         h.update(k.encode("utf-8"))
@@ -198,8 +245,8 @@ def _sha1_of_state_dict_keys(sd: Dict[str, torch.Tensor]) -> str:
 def _safe_quantile_threshold(diff: torch.Tensor, q: float) -> torch.Tensor:
     """
     Deterministic, robust quantile threshold for very large tensors.
-    Tries device quantile -> CPU quantile -> CPU kthvalue.
-    Always operates in float32 for stability. Returns a scalar tensor on diff.device.
+    Try device quantile -> CPU quantile -> CPU kthvalue.
+    Always float32; returns scalar tensor on diff.device.
     """
     q = float(max(0.0, min(1.0, q)))
     flat = diff.reshape(-1).to(torch.float32)
@@ -207,34 +254,47 @@ def _safe_quantile_threshold(diff: torch.Tensor, q: float) -> torch.Tensor:
         return torch.tensor(0.0, dtype=torch.float32, device=diff.device)
     if q >= 1.0:
         return torch.tensor(float("inf"), dtype=torch.float32, device=diff.device)
-
-    # 1) Try quantile on current device
     try:
         return torch.quantile(flat, q)
     except Exception:
         pass
-
-    # 2) Try quantile on CPU
     try:
         th = torch.quantile(flat.cpu(), q)
         return th.to(diff.device)
     except Exception:
         pass
-
-    # 3) Exact threshold via kthvalue on CPU
     n = flat.numel()
-    # kthvalue is effectively 1-indexed range, clamp to [1, n]
     k = max(1, min(n, int(q * n)))
     th = flat.cpu().kthvalue(k).values
     return th.to(diff.device)
 
 
+def _select_calc_dtype(requested: str) -> torch.dtype:
+    """Respect user's calc dtype but fall back safely if bf16 isn't supported."""
+    if requested == "bfloat16":
+        is_supported = False
+        try:
+            is_supported = torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()
+        except Exception:
+            is_supported = False
+        if is_supported:
+            return torch.bfloat16
+        return torch.float32
+    return torch.float32
+
+
 class TenosaiMergeNode:
     """
-    Flux-aware model merge for ComfyUI with deterministic DARE, extra modes, mask broadcasting,
-    skip/lock toggles, presets, and an analysis-only dry run.
+    Flux-aware model merge for ComfyUI:
+      * deterministic DARE (safe quantile fallback)
+      * extra modes
+      * mask broadcasting (model + regex)
+      * safety skip/lock toggles
+      * presets
+      * analysis-only dry run
+      * seed determinism + dtype guard
 
-    Returns: (MODEL, STRING) -> merged model and a JSON summary.
+    Returns: (MODEL, STRING) -> merged model and JSON summary.
     """
 
     def __init__(self) -> None:
@@ -264,7 +324,7 @@ class TenosaiMergeNode:
                     {"default": "simple"}
                 ),
 
-                # Presets UI
+                # Presets
                 "block_preset": (
                     ["Custom", "Balanced", "Style-lean", "Subject-lean", "Text-obedient",
                      "Structure-keeper", "Detail-boost", "Minimal-change"],
@@ -276,6 +336,8 @@ class TenosaiMergeNode:
                 IMAGE_HINT: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 TIME_EMBEDDING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 TEXT_CONDITIONING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                GUIDANCE_EMBEDDING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),  
+                VECTOR_EMBEDDING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),    
                 EARLY_DOWNSAMPLING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 MID_DOWNSAMPLING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
                 LATE_DOWNSAMPLING: ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -306,9 +368,7 @@ class TenosaiMergeNode:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
             },
             "optional": {
-                # per-parameter masks taken from a third model (mask tensors looked up by name)
                 "mask_model": ("MODEL",),
-                # regex -> if a param name matches, we synthesize a constant mask with mask_value
                 "mask_regex": ("STRING", {"default": ""}),
                 "mask_value": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01}),
             },
@@ -319,9 +379,6 @@ class TenosaiMergeNode:
     FUNCTION = "tenosai_merge"
     CATEGORY = "Tenos.ai/Model Surgery"
 
-    # -------------------------
-    # Core merge entrypoint
-    # -------------------------
     def tenosai_merge(
         self,
         model1,
@@ -331,15 +388,17 @@ class TenosaiMergeNode:
         **kwargs,
     ) -> Tuple[Any, str]:
 
-        # Preset controls
+        # Presets
         block_preset = kwargs.get("block_preset", "Custom")
         apply_preset = bool(kwargs.get("apply_preset", False))
 
-        # Block weights (defaults)
+        # Block weights
         block_weights = {
             IMAGE_HINT: float(kwargs.get(IMAGE_HINT, 0.5)),
             TIME_EMBEDDING: float(kwargs.get(TIME_EMBEDDING, 0.5)),
             TEXT_CONDITIONING: float(kwargs.get(TEXT_CONDITIONING, 0.5)),
+            GUIDANCE_EMBEDDING: float(kwargs.get(GUIDANCE_EMBEDDING, 0.5)),
+            VECTOR_EMBEDDING: float(kwargs.get(VECTOR_EMBEDDING, 0.5)),
             EARLY_DOWNSAMPLING: float(kwargs.get(EARLY_DOWNSAMPLING, 0.5)),
             MID_DOWNSAMPLING: float(kwargs.get(MID_DOWNSAMPLING, 0.5)),
             LATE_DOWNSAMPLING: float(kwargs.get(LATE_DOWNSAMPLING, 0.5)),
@@ -351,14 +410,13 @@ class TenosaiMergeNode:
             OTHER: float(kwargs.get(OTHER, 0.5)),
         }
 
-        # Apply preset if requested
         preset_applied = False
         preset_name = str(block_preset)
         if apply_preset and preset_name in PRESETS:
             block_weights = {k: float(v) for k, v in PRESETS[preset_name].items()}
             preset_applied = True
 
-        # Read other settings
+        # Other settings
         dare_prune_amount = float(kwargs.get("dare_prune_amount", 0.10))
         dare_merge_amount = float(kwargs.get("dare_merge_amount", 1.00))
         weight_1 = float(kwargs.get("weight_1", 0.50))
@@ -373,19 +431,18 @@ class TenosaiMergeNode:
 
         analysis_only = bool(kwargs.get("analysis_only", False))
         calc_dtype_str = kwargs.get("calc_dtype", "float32")
+        calc_dtype = _select_calc_dtype(calc_dtype_str)
         seed = int(kwargs.get("seed", 0))
 
         mask_model = kwargs.get("mask_model", None)
         mask_regex = kwargs.get("mask_regex", "") or ""
         mask_value = float(kwargs.get("mask_value", 1.0))
 
-        # Determinism if user cares
         if seed is not None and seed >= 0:
             torch.manual_seed(seed)
             if torch.cuda.is_available():
                 torch.cuda.manual_seed_all(seed)
 
-        # Select base/secondary
         base_model = model1 if base_model_choice == "model1" else model2
         secondary_model = model2 if base_model_choice == "model1" else model1
         base_is_model1 = base_model_choice == "model1"
@@ -395,28 +452,22 @@ class TenosaiMergeNode:
         sec_sd = secondary_model.model.state_dict()
         mask_sd = mask_model.model.state_dict() if hasattr(mask_model, "model") else {}
 
-        # Report sizes (GB)
         def _size_gb(sd: Dict[str, torch.Tensor]) -> float:
             return sum(t.numel() * t.element_size() for t in sd.values()) / (1024 ** 3)
 
         size1 = _size_gb(model1.model.state_dict())
         size2 = _size_gb(model2.model.state_dict())
 
-        # Preflight
         missing_in_sec = [k for k in base_sd.keys() if k not in sec_sd]
         missing_in_base = [k for k in sec_sd.keys() if k not in base_sd]
         shape_mismatches = [k for k in base_sd.keys() if (k in sec_sd) and (tuple(base_sd[k].shape) != tuple(sec_sd[k].shape))]
-
-        # Computation dtype
-        calc_dtype = torch.float32 if calc_dtype_str == "float32" else torch.bfloat16
 
         merged = 0
         kept = 0
         errors = []
 
-        # Analysis-only mode
         if analysis_only:
-            final_size = _size_gb(base_sd)  # no changes
+            final_size = _size_gb(base_sd)
             summary = self._build_summary_json(
                 base_model_choice=base_model_choice,
                 merge_mode=merge_mode,
@@ -445,7 +496,6 @@ class TenosaiMergeNode:
             )
             return merged_model, summary
 
-        # Merge loop
         with torch.no_grad():
             for name, param in merged_model.model.named_parameters():
                 try:
@@ -460,7 +510,6 @@ class TenosaiMergeNode:
                         kept += 1
                         continue
 
-                    # Safety gates
                     if (skip_bias and _is_bias(name)) or (skip_norms and _is_norm_param(name)) \
                        or (lock_time_embed and _is_time_embed(name)) \
                        or (lock_conditioner and _is_conditioner(name)) \
@@ -468,19 +517,16 @@ class TenosaiMergeNode:
                         kept += 1
                         continue
 
-                    # Per-block amount
                     block = _block_from_key(name)
                     amount = float(block_weights.get(block, block_weights[OTHER]))
                     if amount <= 0.0:
                         kept += 1
                         continue
 
-                    # Mask logic
                     mask_tensor = None
                     if mask_sd and name in mask_sd:
                         mask_tensor = mask_sd[name].to(self.device)
                     if (mask_tensor is None) and mask_regex and re.search(mask_regex, name):
-                        # constant mask from regex hit
                         mask_tensor = torch.tensor([mask_value], device=self.device, dtype=torch.float32)
 
                     merged_tensor = self._merge_tensors(
@@ -502,7 +548,6 @@ class TenosaiMergeNode:
 
                 except Exception as ex:
                     errors.append(f"{name}: {repr(ex)}")
-                    # keep original
                     continue
 
         final_size = _size_gb(merged_model.model.state_dict())
@@ -534,9 +579,6 @@ class TenosaiMergeNode:
         )
         return merged_model, summary
 
-    # -------------------------
-    # Per-tensor merge
-    # -------------------------
     def _merge_tensors(
         self,
         t1: torch.Tensor,
@@ -548,12 +590,11 @@ class TenosaiMergeNode:
         weight1: float,
         sigmoid_strength: float,
         auto_k: float,
-        base_is_model1: bool,  # kept for future semantics; not used directly now
+        base_is_model1: bool,
         mask: Optional[torch.Tensor],
         calc_dtype: torch.dtype,
     ) -> torch.Tensor:
 
-        # All calc in chosen dtype
         t1_calc = t1.to(calc_dtype, copy=False)
         t2_calc = t2.to(calc_dtype, copy=False)
         original_dtype = t1.dtype
@@ -567,7 +608,6 @@ class TenosaiMergeNode:
             merged = _lerp(t1_calc, t2_calc, amount)
 
         elif mode == "weighted_sum":
-            # weight_1 always refers to model1 fraction (predictable semantics)
             w1 = torch.tensor(weight1, dtype=t1_calc.dtype, device=t1_calc.device)
             w2 = torch.tensor(1.0 - weight1, dtype=t1_calc.dtype, device=t1_calc.device)
             merged = t1_calc * w1 + t2_calc * w2
@@ -585,14 +625,12 @@ class TenosaiMergeNode:
             merged = t1_calc + amount * choose * (t2_calc - t1_calc)
 
         elif mode == "auto_similarity":
-            cos = _cosine_similarity(t1_calc, t2_calc)  # scalar tensor
-            # higher difference -> larger (1 - cos) -> larger weight
+            cos = _cosine_similarity(t1_calc, t2_calc)
             w = 1.0 / (1.0 + torch.exp(torch.tensor(-auto_k * (1.0 - float(cos)), dtype=t1_calc.dtype, device=t1_calc.device)))
             eff = amount * float(w)
             merged = _lerp(t1_calc, t2_calc, eff)
 
         elif mode == "dare":
-            # Deterministic DARE: prune by global quantile of |diff|
             diff = (t2_calc - t1_calc).abs()
             q = min(max(dare_prune, 0.0), 1.0)
             if q <= 0.0:
@@ -608,10 +646,8 @@ class TenosaiMergeNode:
             merged[~prune_mask] = candidate[~prune_mask]
 
         else:
-            # Fallback to simple
             merged = _lerp(t1_calc, t2_calc, amount)
 
-        # Optional per-parameter mask
         if mask is not None:
             mask_on_device = mask.to(t1_calc.device)
             mask_b = _broadcast_mask_like(mask_on_device, merged)
@@ -625,9 +661,6 @@ class TenosaiMergeNode:
 
         return merged.to(original_dtype, copy=False)
 
-    # -------------------------
-    # Summary JSON
-    # -------------------------
     def _build_summary_json(
         self,
         base_model_choice: str,
@@ -689,7 +722,6 @@ class TenosaiMergeNode:
                 "errors": len(errors or []),
             }
             if errors:
-                # cap to avoid massive UI strings
                 summary["errors_detail"] = [str(e) for e in errors[:50]]
         return json.dumps(summary, indent=2)
 
